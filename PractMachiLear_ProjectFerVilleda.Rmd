@@ -1,0 +1,170 @@
+---
+title: "Practical Machine Learning Project"
+author: "Fernanda Villeda"
+date: "14/11/2019"
+output: html_document
+---
+## Human Activity Recognition
+### About the Data
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks.
+
+
+### Goal of the project
+
+Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions:
+
+&nbsp;
+- Exactly according to the specification (Class A) 
+
+&nbsp;
+- Throwing the elbows to the front (Class B) 
+
+&nbsp;
+- Lifting the dumbbell only halfway (Class C)
+
+&nbsp;
+- Lowering the dumbbell only halfway (Class D)
+
+&nbsp;
+- Throwing the hips to the front (Class E)
+
+Using the variable "classe", the final model is going to predict the manner in which they did the exercise.
+
+### Libraries to use
+
+```{r libraries, echo=TRUE, message=FALSE, warning=FALSE}
+library(readr)
+library(caret)
+library(rattle)
+library(ggplot2)
+```
+
+### Import and incial analysis
+
+```{r inicial, echo=TRUE, message=FALSE, warning=FALSE}
+pml_testing <- read_csv("pml-testing.csv")
+pml_training <- read_csv("pml-training.csv")
+
+prev1 <- ggplot(pml_training, aes(x=classe, fill=classe)) + geom_bar() + scale_fill_brewer(palette = "Pastel1")
+prev1
+
+```
+
+### Train and Test set 
+I will use the training set. pml_training is separated into two datasets (Trainpml and Trainpml) that will be used to train and test the model, respectively.
+In addition, the pml_testing set will be used to validate the model and make the final prediction.
+```{r crossvalidation, echo=TRUE, message=FALSE, warning=FALSE}
+#Crear datos de validacion para el analisis del error
+set.seed(324)
+Validationpml <- pml_testing
+inTrain  <- createDataPartition(pml_training$classe, p=0.7, list=FALSE)
+Trainpml <- pml_training[inTrain, ]
+Testpml <- pml_training[-inTrain, ]
+```
+
+### Cleaning variables
+We delete the first 5 variables ("X1" "user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp") since they are not relevant for the analysis.
+Then we eliminate the variables whose variance is close to 0 and the variables whose values are mostly NA, since these characteristics do not contribute anything to the analysis. At the end of the cleaning we get 54 variables.
+```{r cleaning, echo=TRUE, message=FALSE, warning=FALSE}
+#quitar variables identificadoras 155 
+Trainpml <- Trainpml[, -(1:5)]
+Testpml  <- Testpml[, -(1:5)]
+Validationpml <- Validationpml[,-(1:5)]
+
+#Quitar variables de varianza cercana a 0 122
+nearZV <- nearZeroVar(Trainpml)
+Trainpml <- Trainpml[, -nearZV]
+Testpml  <- Testpml[, -nearZV]
+Validationpml <- Validationpml[,-nearZV]
+
+#54 variables
+mayorityNA    <- sapply(Trainpml, function(x) mean(is.na(x))) > 0.95
+Trainpml <- Trainpml[, mayorityNA==FALSE]
+Testpml  <- Testpml[, mayorityNA==FALSE]
+Validationpml <- Validationpml[,mayorityNA==FALSE]
+```
+
+### Building Models
+3 types of models will be built. I chose these since they are non-lieal models, use the interaction between variables and are in the top of the performance to make predictions.
+1. Decision Tree
+2. Random Forest
+3. Boosting
+
+#### Decision tree
+I'll start with the decision tree. using the "rpart" method and the training data set. The resulting tree is shown below.
+```{r tree, echo=TRUE, message=FALSE, warning=FALSE}
+set.seed(324)
+modDTree <- train(classe ~., method="rpart", data=Trainpml)
+print(modDTree$finalModel)
+fancyRpartPlot(modDTree$finalModel)
+predDtree <- predict(modDTree,newdata=Testpml)
+conMDTree <- confusionMatrix(as.factor(Testpml$classe),predDtree)
+```
+To test the constructed model, I made a confusion matrix using the predictions obtained with the test set and the "classe" column of it.
+We can see that the performance of the model is not so good, because the precision obtained is 0.5227 
+```{r}
+conMDTree
+```
+
+#### Random Forest
+To continue building models, I adjusted the following with the random forest method (one of the best in terms of performance) using the Train data set. Then the predictions are made using the test set.
+```{r random, echo=TRUE, message=FALSE, warning=FALSE}
+#Random Forest
+controlRFor <- trainControl(method="cv", number=3, verboseIter=FALSE)
+modRFor <- train(classe ~., data=Trainpml, method="rf", trControl=controlRFor)
+predRFor <- predict(modRFor,newdata = Testpml)
+conMRFor <- confusionMatrix(as.factor(Testpml$classe),predRFor)
+#mostrar el arbol elegido
+
+
+
+```
+The model is shown, which indicates us according to the precision that the tree with the best performance is 27.
+```{r}
+modRFor
+modRFor$results[2,]
+```
+The confusion matrix is shown below. We observe the precision of 0.9988, which indicates that the model responds very well and the predictions are almost exact.
+```{r}
+conMRFor
+```
+
+#### Boosting
+The third model that I will adjust will be using the gbm method corresponding to Boosting. Again, the training is done using the train function and the Trainpml data set, subsequently, the predictions are made using the Testpml data set.
+```{r gbm, echo=TRUE, message=FALSE, warning=FALSE}
+controlGBM <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+modGBM <- train(classe ~., data=Trainpml, method="gbm", verbose=FALSE, trControl = controlGBM)
+predGBM <- predict(modGBM, newdata = Testpml)
+conMGBM <- confusionMatrix(as.factor(Testpml$classe),predGBM)
+
+```
+the confusion matrix is shown below, again we obtain a significant precision, (0.9908), which indicates that the performance of the model is good.
+```{r}
+conMGBM
+```
+
+### Comparing Models
+We obtain the precision of the 3 models adjusted above (calling the first overall element of each model)
+```{r compare, echo=TRUE, message=FALSE, warning=FALSE}
+conMDTree$overall[1]
+conMRFor$overall[1]
+conMGBM$overall[1]
+```
+We can notice that the models with better performance are Random forest and Boosting. The result is expected, since both models are usually the most chosen for the precision they obtain.
+The model with the high level of Accuracy is Random Forest, so we will make the final prediction of the Validationpml data set with this model.
+
+### Predicting with the choosen model
+We make the prediction of the "class" field of the validationpml data set and assemble the resulting Data frame.
+
+```{r finalpred, echo=TRUE, message=FALSE, warning=FALSE}
+#el modelo con mayor accuracy es Random Forest
+#aplicar modelo en el conjunto de validacion 
+predFinal <- predict(modRFor, newdata=Validationpml)
+predDF <- data.frame(Validationpml,classe=predFinal)
+```
+The distribution of the classes is shown in the bar graph below.
+```{r}
+prev3 <- ggplot(predDF, aes(x=classe, fill=classe)) + geom_bar() + scale_fill_brewer(palette = "Pastel1")
+prev3
+```
+
